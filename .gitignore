@@ -1,0 +1,62 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+active_env/
+
+# IDE and Editors
+.vscode/
+.idea/
+.vs/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+
+# LUNA16 Dataset & Medical CT Data (防止不小心把巨大的 CT 影像和数据提交到 Git)
+*.mhd
+*.raw
+*.zraw
+*.zip
+*.csv
+data-unversioned/
+data/
+
+# PyTorch checkpoints and models (深度学习训练权重)
+*.pt
+*.pth
+*.ckpt
+*.h5
+
+# TensorBoard logs and logs
+runs/
+tb_logs/
+*.log
