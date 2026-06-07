@@ -1,5 +1,5 @@
 import time
-from dsets import getCandidateInfoList
+from dsets import Ct, getCandidateInfoList
 
 def test():
     t0 = time.time()
@@ -17,6 +17,18 @@ def test():
     print("\n前 5 个候选点情况：")
     for idx, c in enumerate(candidates[:5]):
         print(f"  [{idx}] 是否为结节: {c.isNodule_bool}, 直径: {c.diameter_mm:.2f}mm, center_xyz: {c.center_xyz}")
+
+    # 验证单张 CT 加载
+    sample_candidate = candidates[0]
+    print(f"选择候选样本 series_uid：{sample_candidate.series_uid}")
+    t2 = time.time()
+    ct = Ct(sample_candidate.series_uid)
+    t3 = time.time()
+    print(f"成功加载 CT 扫描，耗时: {t3 - t2:.2f} 秒")
+    print(f"CT 数组形状 (Z, Y, X): {ct.hu_a.shape}")
+    print(f"CT 数组 HU 最小值: {ct.hu_a.min()}")
+    print(f"CT 数组 HU 最大值: {ct.hu_a.max()}")
+    print(f"CT 数组 HU 平均值: {ct.hu_a.mean():.2f}")
 
 
 if __name__ == '__main__':
