@@ -7,6 +7,8 @@ from collections import namedtuple
 import numpy as np
 import SimpleITK as sitk
 
+from util import XyzTuple, xyz2irc
+
 CandidateInfoTuple = namedtuple(
 	'CandidateInfoTuple',
 	'isNodule_bool, diameter_mm, series_uid, center_xyz'
@@ -77,3 +79,38 @@ class Ct:
 
 		self.series_uid = series_uid
 		self.hu_a = ct_a
+
+		self.origin_xyz = XyzTuple(*ct_mhd.GetOrigin())
+		self.vxSize_xyz = XyzTuple(*ct_mhd.GetSpacing())
+		self.direction_a = np.array(ct_mhd.GetDirection()).reshape(3, 3)
+
+	def getRawCandidate(self, center_xyz, width_irc):
+		center_irc = xyz2irc(
+			center_xyz,
+			self.origin_xyz,
+			self.vxSize_xyz,
+			self.direction_a
+		)
+
+		slice_list = []
+		pad_list = []
+		for axis, center_val in enumerate(center_irc):
+			start_ndx = int(round(center_val - width_irc[axis] / 2))
+			end_ndx = int(start_ndx + width_irc[axis])
+
+			max_size = self.hu_a.shape[axis]
+			pad_left = max(0, -start_ndx)
+			pad_right = max(0, end_ndx - max_size)
+
+			start_clamped = max(0, start_ndx)
+			end_clamped = min(max_size, end_ndx)
+
+			slice_list.append(slice(start_clamped, end_clamped))
+			pad_list.append((pad_left, pad_right))
+
+		ct_chunk = self.hu_a[tuple(slice_list)]
+
+		if any(any(p) for p in pad_list):
+			ct_chunk = np.pad(ct_chunk, pad_list, mode='constant', constant_values=-1000.0)
+
+		return ct_chunk, center_irc
