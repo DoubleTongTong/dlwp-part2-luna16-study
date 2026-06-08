@@ -7,6 +7,10 @@ from collections import namedtuple
 import numpy as np
 import SimpleITK as sitk
 
+import torch
+from torch.utils.data import Dataset
+import diskcache
+
 from util import XyzTuple, xyz2irc
 
 CandidateInfoTuple = namedtuple(
@@ -114,3 +118,61 @@ class Ct:
 			ct_chunk = np.pad(ct_chunk, pad_list, mode='constant', constant_values=-1000.0)
 
 		return ct_chunk, center_irc
+
+
+raw_cache = diskcache.FanoutCache('data-unversioned/cache', shards=64, timeout=60)
+
+@functools.lru_cache(1, typed=True)
+def getCt(series_uid):
+	return Ct(series_uid)
+
+@raw_cache.memoize(typed=True)
+def getCtRawCandidate(series_uid, center_xyz, width_irc):
+	ct = getCt(series_uid)
+	ct_chunk, center_irc = ct.getRawCandidate(center_xyz, width_irc)
+	return ct_chunk, center_irc
+
+class LunaDataset(Dataset):
+	def __init__(self, val_stride=0, isValSet_bool=None, series_uid=None):
+		self.candidateInfo_list = list(getCandidateInfoList())
+		if series_uid:
+			self.candidateInfo_list = [
+				x for x in self.candidateInfo_list if x.series_uid == series_uid
+			]
+
+		if isValSet_bool:
+			assert val_stride > 0, val_stride
+			self.candidateInfo_list = self.candidateInfo_list[::val_stride]
+			assert self.candidateInfo_list
+		elif val_stride:
+			del self.candidateInfo_list[::val_stride]
+			assert self.candidateInfo_list
+
+	def __len__(self):
+		return len(self.candidateInfo_list)
+
+	def __getitem__(self, ndx):
+		candidateInfo_tup = self.candidateInfo_list[ndx]
+		width_irc = (32, 48, 48)
+
+		candidate_a, center_irc = getCtRawCandidate(
+			candidateInfo_tup.series_uid,
+			candidateInfo_tup.center_xyz,
+			width_irc
+		)
+
+		candidate_t = torch.from_numpy(candidate_a)
+		candidate_t = candidate_t.to(torch.float32)
+		candidate_t = candidate_t.unsqueeze(0)
+
+		pos_t = torch.tensor([
+			not candidateInfo_tup.isNodule_bool,
+			candidateInfo_tup.isNodule_bool
+		], dtype=torch.long)
+
+		return (
+			candidate_t,
+			pos_t,
+			candidateInfo_tup.series_uid,
+			torch.tensor(center_irc)
+		)

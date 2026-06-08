@@ -1,5 +1,5 @@
 import time
-from dsets import Ct, getCandidateInfoList
+from dsets import Ct, LunaDataset, getCandidateInfoList
 
 def test():
     t0 = time.time()
@@ -44,6 +44,47 @@ def test():
     print(f"填充后裁剪块形状 (I, R, C): {ct_chunk_padded.shape}")
     # 前 24 个体素应该都是填充的 -1000.0 (空气)
     print(f"裁剪块边界填充部分的值 (第一维前3个元素): {ct_chunk_padded[:3, 0, 0]}")
+
+    # 验证 LunaDataset
+    ds = LunaDataset()
+    print(f"初始化完整数据集，样本数: {len(ds)}")
+
+    val_ds = LunaDataset(val_stride=10, isValSet_bool=True)
+    train_ds = LunaDataset(val_stride=10, isValSet_bool=False)
+    print(f"验证集样本数 (val_stride=10): {len(val_ds)}")
+    print(f"训练集样本数 (val_stride=10): {len(train_ds)}")
+
+    print("\n读取第一个样本 (触发第一次缓存)...")
+    t_first = time.time()
+    candidate_t, pos_t, series_uid, center_irc = ds[0]
+    t_first_end = time.time()
+    print(f"第一次读取耗时: {t_first_end - t_first:.4f} 秒")
+    print(f"样本张量形状: {candidate_t.shape}, 类别标签: {pos_t}, series_uid: {series_uid}, 中心坐标: {center_irc}")
+
+    print("\n再次读取同一个样本 (触发缓存命中)...")
+    t_second = time.time()
+    candidate_t2, pos_t2, series_uid2, center_irc2 = ds[0]
+    t_second_end = time.time()
+    print(f"第二次读取耗时: {t_second_end - t_second:.4f} 秒")
+
+    # 验证数据可视化功能
+    import matplotlib
+    # 设置为非交互式后端，防止弹窗阻塞命令行运行
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from vis import findPositiveSamples, showCandidate
+
+    pos_samples = findPositiveSamples(limit=2)
+    print(f"找到 {len(pos_samples)} 个阳性样本，第一个样本的 series_uid: {pos_samples[0].series_uid}")
+
+    print("正在生成结节可视化图像...")
+    showCandidate(pos_samples[0].series_uid)
+
+    # 将绘制的图像保存到本地文件
+    output_img = 'candidate_visualization.png'
+    plt.savefig(output_img)
+    plt.close()
+    print(f"可视化图像成功保存至: {output_img}")
 
 
 if __name__ == '__main__':

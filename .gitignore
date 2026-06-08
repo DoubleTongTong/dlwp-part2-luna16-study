@@ -60,3 +60,6 @@ data/
 runs/
 tb_logs/
 *.log
+
+# Generated visualizations
+*.png
