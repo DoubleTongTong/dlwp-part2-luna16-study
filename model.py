@@ -37,7 +37,7 @@ class LunaModel(nn.Module):
         self.block1 = LunaBlock(in_channels, conv_channels)
         self.block2 = LunaBlock(conv_channels, conv_channels * 2)
         self.block3 = LunaBlock(conv_channels * 2, conv_channels * 4)
-        self.block4 = LunaBlock(in_channels * 4, conv_channels * 8)
+        self.block4 = LunaBlock(conv_channels * 4, conv_channels * 8)
 
         # 头部：全连接层与 Softmax，输入特征数为 64*2*3*3 = 1152
         self.head_linear = nn.Linear(1152, 2)
