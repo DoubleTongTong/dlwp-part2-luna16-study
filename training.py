@@ -1,3 +1,4 @@
+import os
 import sys
 import argparse
 import datetime
@@ -8,6 +9,7 @@ import torch
 import torch.nn as nn
 from torch.optim import SGD
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
 from dsets import LunaDataset
 from model import LunaModel
@@ -58,6 +60,10 @@ class LunaTrainingApp:
         # 初始化模型与优化器
         self.model = self.initModel()
         self.optimizer = self.initOptimizer()
+
+        self.trn_writer = None
+        self.val_writer = None
+        self.totalTrainingSamples_count = 0
 
     def initModel(self):
         model = LunaModel()
@@ -138,6 +144,10 @@ class LunaTrainingApp:
             valMetrics_t = self.doValidation(epoch_ndx, val_dl)
             self.logMetrics(epoch_ndx, 'val', valMetrics_t)
 
+        if self.trn_writer is not None:
+            self.trn_writer.close()
+            self.val_writer.close()
+
     def doTraining(self, epoch_ndx, train_dl):
         self.model.train()
         trnMetrics_g = torch.zeros(
@@ -162,6 +172,7 @@ class LunaTrainingApp:
             )
             loss_var.backward()
             self.optimizer.step()
+            self.totalTrainingSamples_count += len(batch_tup[0])
 
             # Batch logging
             if batch_ndx % 10 == 0:
@@ -227,6 +238,12 @@ class LunaTrainingApp:
 
         return loss_g.mean()
 
+    def initTensorboardWriters(self):
+        if self.trn_writer is None:
+            log_dir = os.path.join('runs', self.time_str)
+            self.trn_writer = SummaryWriter(log_dir=log_dir + '-trn_cls')
+            self.val_writer = SummaryWriter(log_dir=log_dir + '-val_cls')
+
     def logMetrics(
         self,
         epoch_ndx,
@@ -254,6 +271,11 @@ class LunaTrainingApp:
             / np.float32(metrics_t.shape[1]) * 100
         metrics_dict['correct/neg'] = neg_correct / np.float32(neg_count) * 100 if neg_count > 0 else 0.0
         metrics_dict['correct/pos'] = pos_correct / np.float32(pos_count) * 100 if pos_count > 0 else 0.0
+
+        self.initTensorboardWriters()
+        writer = self.trn_writer if mode_str == 'trn' else self.val_writer
+        for key, value in metrics_dict.items():
+            writer.add_scalar(key, value, self.totalTrainingSamples_count)
 
         log.info(
             ("E{} {:8} {loss/all:.4f} loss, "
