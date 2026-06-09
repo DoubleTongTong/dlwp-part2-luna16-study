@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 
 from dsets import LunaDataset
 from model import LunaModel
+from util import enumerateWithEstimate
 
 METRICS_LABEL_NDX = 0
 METRICS_PRED_NDX = 1
@@ -145,7 +146,13 @@ class LunaTrainingApp:
             device=self.device
         )
 
-        for batch_ndx, batch_tup in enumerate(train_dl):
+        for batch_ndx, batch_tup in enumerateWithEstimate(
+            train_dl,
+            "E{} Training".format(epoch_ndx),
+            start_ndx=0,
+            print_ndx=16,
+            backoff=2,
+        ):
             self.optimizer.zero_grad()
             loss_var = self.computeBatchLoss(
                 batch_ndx,
@@ -176,7 +183,13 @@ class LunaTrainingApp:
                 device=self.device,
             )
 
-            for batch_ndx, batch_tup in enumerate(val_dl):
+            for batch_ndx, batch_tup in enumerateWithEstimate(
+                val_dl,
+                "E{} Validation".format(epoch_ndx),
+                start_ndx=0,
+                print_ndx=16,
+                backoff=2,
+            ):
                 loss_var = self.computeBatchLoss(
                     batch_ndx,
                     batch_tup,
