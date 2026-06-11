@@ -92,6 +92,7 @@ class LunaTrainingApp:
         train_dl = DataLoader(
             train_ds,
             batch_size=batch_size,
+            shuffle=True,
             num_workers=self.cli_args.num_workers,
             pin_memory=self.use_cuda
         )
@@ -175,7 +176,7 @@ class LunaTrainingApp:
             self.totalTrainingSamples_count += len(batch_tup[0])
 
             # Batch logging
-            if batch_ndx % 10 == 0:
+            if batch_ndx >= 16 and (batch_ndx & (batch_ndx - 1)) == 0:
                 log.info("Epoch {} Training Batch {}/{} (loss: {:.4f})".format(
                     epoch_ndx,
                     batch_ndx,
@@ -209,7 +210,7 @@ class LunaTrainingApp:
                 )
 
                 # Batch logging
-                if batch_ndx % 10 == 0:
+                if batch_ndx >= 16 and (batch_ndx & (batch_ndx - 1)) == 0:
                     log.info("Epoch {} Validation Batch {}/{} (loss: {:.4f})".format(
                         epoch_ndx,
                         batch_ndx,

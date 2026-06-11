@@ -13,6 +13,11 @@ import diskcache
 
 from util import XyzTuple, xyz2irc
 
+# 数据集主路径常量
+LUNA16_DIR = 'E:/LUNA16'
+# 磁盘缓存前缀路径，默认为当前目录
+CACHE_DIR = '.'
+
 CandidateInfoTuple = namedtuple(
 	'CandidateInfoTuple',
 	'isNodule_bool, diameter_mm, series_uid, center_xyz'
@@ -21,12 +26,12 @@ CandidateInfoTuple = namedtuple(
 @functools.lru_cache(1)
 def getCandidateInfoList(requireOnDisk_bool=True):
 	# 根据用户数据集实际路径 E:\LUNA16 进行读取
-	mhd_list = glob.glob('E:/LUNA16/subset*/*.mhd')
+	mhd_list = glob.glob(f'{LUNA16_DIR}/subset*/*.mhd')
 	presentOnDisk_set = {os.path.split(p)[-1][:-4] for p in mhd_list}
 
 	# 构建真实结节字典
 	diameter_dict = {}
-	with open('E:/LUNA16/annotations.csv', "r", encoding='utf-8') as f:
+	with open(f'{LUNA16_DIR}/annotations.csv', "r", encoding='utf-8') as f:
 		for row in list(csv.reader(f))[1:]:
 			series_uid = row[0]
 			annotationCenter_xyz = tuple([float(x) for x in row[1:4]])
@@ -37,7 +42,7 @@ def getCandidateInfoList(requireOnDisk_bool=True):
 
 	# 遍历候选名单并进行模糊匹配
 	candidateInfo_list = []
-	with open('E:/LUNA16/candidates.csv', "r", encoding='utf-8') as f:
+	with open(f'{LUNA16_DIR}/candidates.csv', "r", encoding='utf-8') as f:
 		for row in list(csv.reader(f))[1:]:
 			series_uid = row[0]
 			if series_uid not in presentOnDisk_set and requireOnDisk_bool:
@@ -75,7 +80,7 @@ def getCandidateInfoList(requireOnDisk_bool=True):
 class Ct:
 	def __init__(self, series_uid):
 		mhd_path = glob.glob(
-			'E:/LUNA16/subset*/{}.mhd'.format(series_uid)
+			f'{LUNA16_DIR}/subset*/{series_uid}.mhd'
 		)[0]
 		ct_mhd = sitk.ReadImage(mhd_path)
 		ct_a = np.array(sitk.GetArrayFromImage(ct_mhd), dtype=np.float32)
@@ -120,7 +125,7 @@ class Ct:
 		return ct_chunk, center_irc
 
 
-raw_cache = diskcache.FanoutCache('data-unversioned/cache', shards=64, timeout=60)
+raw_cache = diskcache.FanoutCache(os.path.join(CACHE_DIR, 'data-unversioned/cache'), shards=64, timeout=60, size_limit=2**40)
 
 @functools.lru_cache(1, typed=True)
 def getCt(series_uid):
