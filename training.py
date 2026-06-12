@@ -263,6 +263,11 @@ class LunaTrainingApp:
         neg_correct = int((negLabel_mask & negPred_mask).sum())
         pos_correct = int((posLabel_mask & posPred_mask).sum())
 
+        trueNeg_count = neg_correct
+        truePos_count = pos_correct
+        falsePos_count = neg_count - neg_correct
+        falseNeg_count = pos_count - pos_correct
+
         metrics_dict = {}
         metrics_dict['loss/all'] = metrics_t[METRICS_LOSS_NDX].mean()
         metrics_dict['loss/neg'] = metrics_t[METRICS_LOSS_NDX, negLabel_mask].mean() if neg_count > 0 else 0.0
@@ -273,6 +278,13 @@ class LunaTrainingApp:
         metrics_dict['correct/neg'] = neg_correct / np.float32(neg_count) * 100 if neg_count > 0 else 0.0
         metrics_dict['correct/pos'] = pos_correct / np.float32(pos_count) * 100 if pos_count > 0 else 0.0
 
+        precision = metrics_dict['pr/precision'] = \
+            truePos_count / np.float32(truePos_count + falsePos_count)
+        recall = metrics_dict['pr/recall'] = \
+            truePos_count / np.float32(truePos_count + falseNeg_count)
+        metrics_dict['pr/f1_score'] = \
+            2 * (precision * recall) / (precision + recall)
+
         self.initTensorboardWriters()
         writer = self.trn_writer if mode_str == 'trn' else self.val_writer
         for key, value in metrics_dict.items():
@@ -281,6 +293,9 @@ class LunaTrainingApp:
         log.info(
             ("E{} {:8} {loss/all:.4f} loss, "
              + "{correct/all:-5.1f}% correct, "
+             + "{pr/precision:.4f} precision, "
+             + "{pr/recall:.4f} recall, "
+             + "{pr/f1_score:.4f} f1 score"
             ).format(
                 epoch_ndx,
                 mode_str,
