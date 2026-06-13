@@ -55,8 +55,57 @@ class LunaTrainingApp:
             action='store_true',
             default=False,
         )
+        parser.add_argument('--augmented',
+            help="Enable all data augmentation.",
+            action='store_true',
+            default=False,
+        )
+        parser.add_argument('--augment-flip',
+            help="Augment by flipping data.",
+            action='store_true',
+            default=False,
+        )
+        parser.add_argument('--augment-offset', '--augment-shift',
+            help="Augment by shifting data.",
+            action='store_true',
+            default=False,
+            dest='augment_offset',
+        )
+        parser.add_argument('--augment-scale',
+            help="Augment by scaling data.",
+            action='store_true',
+            default=False,
+        )
+        parser.add_argument('--augment-rotate',
+            help="Augment by rotating data.",
+            action='store_true',
+            default=False,
+        )
+        parser.add_argument('--augment-noise',
+            help="Augment by adding noise.",
+            action='store_true',
+            default=False,
+        )
+        parser.add_argument('comment',
+            nargs='?',
+            default='',
+            help="Comment suffix for Tensorboard run name.",
+        )
+
         self.cli_args = parser.parse_args(sys_argv)
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
+
+        self.augmentation_dict = {}
+        if self.cli_args.augmented or self.cli_args.augment_flip:
+            self.augmentation_dict['flip'] = True
+        if self.cli_args.augmented or self.cli_args.augment_offset:
+            self.augmentation_dict['offset'] = 0.1
+        if self.cli_args.augmented or self.cli_args.augment_scale:
+            self.augmentation_dict['scale'] = 0.2
+        if self.cli_args.augmented or self.cli_args.augment_rotate:
+            self.augmentation_dict['rotate'] = True
+        if self.cli_args.augmented or self.cli_args.augment_noise:
+            self.augmentation_dict['noise'] = 25.0
 
         # 硬件加速检查与配置
         self.use_cuda = torch.cuda.is_available()
@@ -90,7 +139,8 @@ class LunaTrainingApp:
             val_stride=10,
             isValSet_bool=False,
             ratio_int=int(self.cli_args.balanced),
-            limit=self.cli_args.limit
+            limit=self.cli_args.limit,
+            augmentation_dict=self.augmentation_dict,
         )
         batch_size = self.cli_args.batch_size
         if self.use_cuda:
@@ -249,6 +299,8 @@ class LunaTrainingApp:
     def initTensorboardWriters(self):
         if self.trn_writer is None:
             log_dir = os.path.join('runs', self.time_str)
+            if self.cli_args.comment:
+                log_dir += '_' + self.cli_args.comment
             self.trn_writer = SummaryWriter(log_dir=log_dir + '-trn_cls')
             self.val_writer = SummaryWriter(log_dir=log_dir + '-val_cls')
 
