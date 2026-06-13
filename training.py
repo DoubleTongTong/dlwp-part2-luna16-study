@@ -50,6 +50,11 @@ class LunaTrainingApp:
             default=None,
             type=int,
         )
+        parser.add_argument('--balanced',
+            help="Balance the training data to half positive, half negative.",
+            action='store_true',
+            default=False,
+        )
         self.cli_args = parser.parse_args(sys_argv)
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
 
@@ -83,7 +88,9 @@ class LunaTrainingApp:
     def initTrainDl(self):
         train_ds = LunaDataset(
             val_stride=10,
-            isValSet_bool=False
+            isValSet_bool=False,
+            ratio_int=int(self.cli_args.balanced),
+            limit=self.cli_args.limit
         )
         batch_size = self.cli_args.batch_size
         if self.use_cuda:
@@ -102,7 +109,8 @@ class LunaTrainingApp:
     def initValDl(self):
         val_ds = LunaDataset(
             val_stride=10,
-            isValSet_bool=True
+            isValSet_bool=True,
+            limit=self.cli_args.limit
         )
         batch_size = self.cli_args.batch_size
         if self.use_cuda:
@@ -124,8 +132,6 @@ class LunaTrainingApp:
         val_dl = self.initValDl()
 
         if self.cli_args.limit:
-            train_dl.dataset.candidateInfo_list = train_dl.dataset.candidateInfo_list[:self.cli_args.limit]
-            val_dl.dataset.candidateInfo_list = val_dl.dataset.candidateInfo_list[:self.cli_args.limit]
             log.info("Debugging mode enabled: Dataset size limited to {}".format(self.cli_args.limit))
 
         log.info("Successfully initialized training DataLoader with {} samples ({} batches)".format(
@@ -151,6 +157,7 @@ class LunaTrainingApp:
 
     def doTraining(self, epoch_ndx, train_dl):
         self.model.train()
+        train_dl.dataset.shuffleSamples()
         trnMetrics_g = torch.zeros(
             METRICS_SIZE,
             len(train_dl.dataset),
