@@ -1,6 +1,7 @@
 import math
 import torch.nn as nn
 import torch.nn.functional as F
+from external.unet import UNet
 
 class LunaBlock(nn.Module):
     def __init__(self, in_channels, conv_channels):
@@ -72,3 +73,29 @@ class LunaModel(nn.Module):
 
         linear_output = self.head_linear(conv_flat)
         return linear_output, self.head_softmax(linear_output)
+
+
+class UNetWrapper(nn.Module):
+    def __init__(self, **kwargs):
+        super().__init__()
+
+        self.input_batchnorm = nn.BatchNorm2d(kwargs['in_channels'])
+        self.unet = UNet(**kwargs)
+        self.final = nn.Sigmoid()
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if type(m) in {nn.Conv2d, nn.ConvTranspose2d}:
+                nn.init.kaiming_normal_(
+                    m.weight.data, a=0, mode='fan_out', nonlinearity='relu'
+                )
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias.data)
+
+    def forward(self, input_batch):
+        bn_output = self.input_batchnorm(input_batch)
+        un_output = self.unet(bn_output)
+        fn_output = self.final(un_output)
+        return fn_output
