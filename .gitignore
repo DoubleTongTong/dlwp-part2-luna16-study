@@ -47,6 +47,7 @@ active_env/
 *.zraw
 *.zip
 *.csv
+!annotations_with_malignancy.csv
 data-unversioned/
 data/
 
