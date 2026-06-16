@@ -356,3 +356,120 @@ class LunaDataset(Dataset):
 			candidateInfo_tup.series_uid,
 			torch.tensor(center_irc)
 		)
+
+
+@raw_cache.memoize(typed=True)
+def getCtSampleSize(series_uid):
+	ct = Ct(series_uid)
+	return int(ct.hu_a.shape[0]), ct.positive_indexes
+
+class Luna2dSegmentationDataset(Dataset):
+	def __init__(
+		self,
+		val_stride=0,
+		isValSet_bool=None,
+		series_uid=None,
+		contextSlices_count=3,
+		fullCt_bool=False,
+		augmentation_dict=None,
+		limit=None
+	):
+		self.contextSlices_count = contextSlices_count
+		self.fullCt_bool = fullCt_bool
+		self.augmentation_dict = augmentation_dict
+		self.limit = limit
+
+		if series_uid:
+			self.series_list = [series_uid]
+		else:
+			self.series_list = sorted(getCandidateInfoDict().keys())
+
+		if isValSet_bool:
+			assert val_stride > 0, val_stride
+			self.series_list = self.series_list[::val_stride]
+			assert self.series_list
+		elif val_stride > 0:
+			del self.series_list[::val_stride]
+			assert self.series_list
+
+		if self.limit:
+			self.series_list = self.series_list[:self.limit]
+
+		self.sample_list = []
+		for s_uid in self.series_list:
+			index_count, positive_indexes = getCtSampleSize(s_uid)
+			if self.fullCt_bool:
+				self.sample_list += [(s_uid, slice_ndx) for slice_ndx in range(index_count)]
+			else:
+				self.sample_list += [(s_uid, slice_ndx) for slice_ndx in positive_indexes]
+
+		self.candidateInfo_list = getCandidateInfoList()
+		series_set = set(self.series_list)
+		self.candidateInfo_list = [
+			cit for cit in self.candidateInfo_list if cit.series_uid in series_set
+		]
+		self.pos_list = [nt for nt in self.candidateInfo_list if nt.isNodule_bool]
+
+		if self.limit:
+			self.sample_list = self.sample_list[:self.limit]
+			self.pos_list = self.pos_list[:self.limit]
+
+	def __len__(self):
+		return len(self.sample_list)
+
+	def __getitem__(self, ndx):
+		series_uid, slice_ndx = self.sample_list[ndx % len(self.sample_list)]
+		return self.getitem_fullSlice(series_uid, slice_ndx)
+
+	def getitem_fullSlice(self, series_uid, slice_ndx):
+		ct = getCt(series_uid)
+		ct_t = torch.zeros((self.contextSlices_count * 2 + 1, 512, 512))
+
+		start_ndx = slice_ndx - self.contextSlices_count
+		end_ndx = slice_ndx + self.contextSlices_count + 1
+
+		for i, context_ndx in enumerate(range(start_ndx, end_ndx)):
+			context_ndx = max(context_ndx, 0)
+			context_ndx = min(context_ndx, ct.hu_a.shape[0] - 1)
+			ct_t[i] = torch.from_numpy(ct.hu_a[context_ndx].astype(np.float32))
+
+		ct_t.clamp_(-1000, 1000)
+
+		pos_t = torch.from_numpy(ct.positive_mask[slice_ndx].astype(np.float32)).unsqueeze(0)
+
+		return ct_t, pos_t, ct.series_uid, slice_ndx
+
+
+class TrainingLuna2dSegmentationDataset(Luna2dSegmentationDataset):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+
+	def __len__(self):
+		return len(self.pos_list)
+
+	def __getitem__(self, ndx):
+		candidateInfo_tup = self.pos_list[ndx % len(self.pos_list)]
+		return self.getitem_trainingCrop(candidateInfo_tup)
+
+	def getitem_trainingCrop(self, candidateInfo_tup):
+		ct_a, pos_a, center_irc = getCtRawCandidate(
+			candidateInfo_tup.series_uid,
+			candidateInfo_tup.center_xyz,
+			(7, 96, 96)
+		)
+
+		pos_a = pos_a[3:4] # 限制在中心切片
+		# 随机生成偏移量
+		row_offset = random.randrange(0, 32)
+		col_offset = random.randrange(0, 32)
+
+		ct_t = torch.from_numpy(
+			ct_a[:, row_offset : row_offset + 64, col_offset : col_offset + 64]
+		).to(torch.float32)
+		pos_t = torch.from_numpy(
+            pos_a[:, row_offset : row_offset + 64, col_offset : col_offset + 64]
+        ).to(torch.float32)
+
+		slice_ndx = center_irc.index
+
+		return ct_t, pos_t, candidateInfo_tup.series_uid, slice_ndx
