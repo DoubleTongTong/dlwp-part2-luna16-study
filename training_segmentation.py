@@ -4,14 +4,17 @@ import argparse
 import datetime
 import logging
 import os
+import shutil
+import hashlib
 
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.optim import Adam
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
-from dsets import Luna2dSegmentationDataset, TrainingLuna2dSegmentationDataset
+from dsets import Luna2dSegmentationDataset, TrainingLuna2dSegmentationDataset, getCt
 from model import UNetWrapper, SegmentationAugmentation
 from util import enumerateWithEstimate
 
@@ -66,7 +69,18 @@ class LunaSegmentationTrainingApp:
         self.segmentation_model, self.augmentation_model = self.initModel()
         self.optimizer = self.initOptimizer()
 
+        self.trn_writer = None
+        self.val_writer = None
+
         self.totalTrainingSamples_count = 0
+
+    def initTensorboardWriters(self):
+        if self.trn_writer is None:
+            log_dir = os.path.join('runs', self.time_str)
+            if self.cli_args.comment:
+                log_dir += '_' + self.cli_args.comment
+            self.trn_writer = SummaryWriter(log_dir=log_dir + '-trn_seg')
+            self.val_writer = SummaryWriter(log_dir=log_dir + '-val_seg')
 
     def initModel(self):
         # 初始化 2D U-Net 模型
@@ -233,21 +247,131 @@ class LunaSegmentationTrainingApp:
             f"(TP: {tp_sum:.0f}, FN: {fn_sum:.0f}, FP: {fp_sum:.0f})"
         )
 
-        return f1_score
+        self.initTensorboardWriters()
+        writer = self.trn_writer if mode_str == 'trn' else self.val_writer
+        writer.add_scalar('loss/all', loss_mean, self.totalTrainingSamples_count)
+        writer.add_scalar('pr/precision', precision, self.totalTrainingSamples_count)
+        writer.add_scalar('pr/recall', recall, self.totalTrainingSamples_count)
+        writer.add_scalar('pr/f1_score', f1_score, self.totalTrainingSamples_count)
+
+        return recall
+
+    def logImages(self, epoch_ndx, mode_str, dl):
+        self.segmentation_model.eval()
+        self.initTensorboardWriters()
+        writer = getattr(self, mode_str + '_writer')
+
+        images = sorted(dl.dataset.series_list)[:12]
+        for series_ndx, series_uid in enumerate(images):
+            ct = getCt(series_uid)
+            for slice_ndx in range(6):
+                ct_ndx = slice_ndx * (ct.hu_a.shape[0] - 1) // 5
+                sample_tup = dl.dataset.getitem_fullSlice(series_uid, ct_ndx)
+                ct_t, label_t, series_uid, ct_ndx = sample_tup
+
+                with torch.no_grad():
+                    input_g = ct_t.unsqueeze(0).to(self.device)
+                    prediction_g = self.segmentation_model(input_g)
+                    prediction_a = (prediction_g[0, 0] > 0.5).cpu().numpy()
+                    label_a = (label_t[0] > 0.5).numpy()
+
+                ct_t[:-1, :, :] /= 2000
+                ct_t[:-1, :, :] += 0.5
+                ctSlice_a = ct_t[dl.dataset.contextSlices_count].numpy()
+
+                # 预测图片 (RGB，红色表示错误，绿色表示真阳性)
+                image_a = np.zeros((512, 512, 3), dtype=np.float32)
+                image_a[:, :, :] = ctSlice_a.reshape((512, 512, 1))
+                image_a[:, :, 0] += prediction_a & (1 - label_a)
+                image_a[:, :, 0] += (1 - prediction_a) & label_a
+                image_a[:, :, 1] += ((1 - prediction_a) & label_a) * 0.5
+                image_a[:, :, 1] += prediction_a & label_a
+                image_a *= 0.5
+                image_a.clip(0, 1, image_a)
+
+                writer.add_image(
+                    f'{mode_str}/{series_ndx}_prediction_{slice_ndx}',
+                    image_a,
+                    self.totalTrainingSamples_count,
+                    dataformats='HWC',
+                )
+
+                # 真实标签图片 (RGB，绿色表示真实结节)
+                image_label_a = np.zeros((512, 512, 3), dtype=np.float32)
+                image_label_a[:, :, :] = ctSlice_a.reshape((512, 512, 1))
+                image_label_a[:, :, 1] += label_a
+                image_label_a *= 0.5
+                image_label_a.clip(0, 1, image_label_a)
+
+                writer.add_image(
+                    f'{mode_str}/{series_ndx}_label_{slice_ndx}',
+                    image_label_a,
+                    self.totalTrainingSamples_count,
+                    dataformats='HWC',
+                )
+
+    def saveModel(self, type_str, epoch_ndx, isBest=False):
+        os.makedirs('models', exist_ok=True)
+        file_path = os.path.join(
+            'models',
+            f'{type_str}_{self.time_str}_{self.cli_args.comment}.{self.totalTrainingSamples_count}.state'
+        )
+
+        model = self.segmentation_model
+        if isinstance(model, torch.nn.DataParallel):
+            model = model.module
+
+        state = {
+            'sys_argv': sys.argv,
+            'time': str(datetime.datetime.now()),
+            'model_state': model.state_dict(),
+            'model_name': type(model).__name__,
+            'optimizer_state': self.optimizer.state_dict(),
+            'optimizer_name': type(self.optimizer).__name__,
+            'epoch': epoch_ndx,
+            'totalTrainingSamples_count': self.totalTrainingSamples_count,
+        }
+
+        torch.save(state, file_path)
+        log.info(f"Saved model params to {file_path}")
+
+        if isBest:
+            best_path = os.path.join(
+                'models',
+                f'{type_str}_{self.time_str}_{self.cli_args.comment}.best.state'
+            )
+            shutil.copyfile(file_path, best_path)
+            log.info(f"Saved model params to {best_path}")
+            with open(file_path, 'rb') as f:
+                log.info("SHA1: " + hashlib.sha1(f.read()).hexdigest())
 
     def main(self):
         log.info(f"开始训练分割任务，配置: {self.cli_args}")
         train_dl = self.initTrainDl()
         val_dl = self.initValDl()
 
+        self.validation_cadence = 5
+        best_score = 0.0
+
         for epoch_ndx in range(1, self.cli_args.epochs + 1):
             log.info(f"Epoch {epoch_ndx}/{self.cli_args.epochs} 训练开始...")
             trnMetrics_t = self.doTraining(epoch_ndx, train_dl)
             self.logMetrics(epoch_ndx, 'trn', trnMetrics_t)
 
-            log.info(f"Epoch {epoch_ndx}/{self.cli_args.epochs} 验证开始...")
-            valMetrics_t = self.doValidation(epoch_ndx, val_dl)
-            self.logMetrics(epoch_ndx, 'val', valMetrics_t)
+            if epoch_ndx == 1 or epoch_ndx % self.validation_cadence == 0:
+                log.info(f"Epoch {epoch_ndx}/{self.cli_args.epochs} 验证开始...")
+                valMetrics_t = self.doValidation(epoch_ndx, val_dl)
+
+                score = self.logMetrics(epoch_ndx, 'val', valMetrics_t)
+                best_score = max(score, best_score)
+
+                self.saveModel('seg', epoch_ndx, score == best_score)
+                self.logImages(epoch_ndx, 'trn', train_dl)
+                self.logImages(epoch_ndx, 'val', val_dl)
+
+        if self.trn_writer is not None:
+            self.trn_writer.close()
+            self.val_writer.close()
 
         log.info("训练完成！")
 
